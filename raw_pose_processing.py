@@ -148,7 +148,9 @@ def amass_to_pose(src_path, save_path):
         bm = male_bm
     else:
         bm = female_bm
-    down_sample = int(fps / ex_fps)
+    # v2-bugfix B5: round (not int truncation) avoids 2x downsample for ~60fps
+    # subsets where mocap_framerate is e.g. 59.999. See issue #176.
+    down_sample = round(fps / ex_fps)
 #     print(frame_number)
 #     print(fps)
 
