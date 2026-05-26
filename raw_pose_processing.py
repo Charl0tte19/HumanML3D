@@ -11,11 +11,13 @@
 # nbconvert-strip: get_ipython().run_line_magic('matplotlib', 'notebook')
 # nbconvert-strip: get_ipython().run_line_magic('matplotlib', 'inline')
 
+import math
 import sys, os
 import torch
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
+from scipy.signal import resample_poly
 from tqdm import tqdm
 
 
@@ -132,6 +134,25 @@ trans_matrix = np.array([[1.0, 0.0, 0.0],
                             [0.0, 0.0, 1.0],
                             [0.0, 1.0, 0.0]])
 ex_fps = 20
+def downsample_or_resample(poses, trans, fps, target_fps=ex_fps, tol=1e-3):
+    ratio = float(fps) / float(target_fps)
+    factor = max(1, round(ratio))
+    # Near-integer ratios (59.999->20, 60->20, 120->20) should stay as
+    # stride sampling. Non-integer ratios (250->20) need real resampling.
+    if abs(ratio - factor) <= tol:
+        return poses[::factor, ...], trans[::factor, ...]
+    up = int(target_fps)
+    down = int(round(float(fps)))
+    gcd = math.gcd(up, down)
+    up //= gcd
+    down //= gcd
+    # line padding avoids the frame-0 transient caused by resample_poly's
+    # default zero-padding while keeping this preprocessing path simple.
+    return (
+        resample_poly(poses, up=up, down=down, axis=0, padtype="line"),
+        resample_poly(trans, up=up, down=down, axis=0, padtype="line"),
+    )
+
 def amass_to_pose(src_path, save_path):
     bdata = np.load(src_path, allow_pickle=True)
     fps = 0
@@ -148,14 +169,10 @@ def amass_to_pose(src_path, save_path):
         bm = male_bm
     else:
         bm = female_bm
-    # v2-bugfix B5: round (not int truncation) avoids 2x downsample for ~60fps
-    # subsets where mocap_framerate is e.g. 59.999. See issue #176.
-    down_sample = round(fps / ex_fps)
 #     print(frame_number)
 #     print(fps)
 
-    bdata_poses = bdata['poses'][::down_sample,...]
-    bdata_trans = bdata['trans'][::down_sample,...]
+    bdata_poses, bdata_trans = downsample_or_resample(bdata['poses'], bdata['trans'], fps)
     body_parms = {
             'root_orient': torch.Tensor(bdata_poses[:, :3]).to(comp_device),
             'pose_body': torch.Tensor(bdata_poses[:, 3:66]).to(comp_device),
@@ -282,7 +299,4 @@ for i in tqdm(range(total_amount)):
 
 
 # In[ ]:
-
-
-
 
